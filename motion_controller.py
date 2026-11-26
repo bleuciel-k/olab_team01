@@ -1,13 +1,13 @@
-"""ROS 2 Jazzy motion controller for Vstone Light Rover in a 30 cm corridor maze.
+"""幅30cm通路の迷路用 Vstone Light Rover 移動制御ノード (ROS 2 Jazzy)
 
-Subscribes to:
-  - Wall distances from the radar/LiDAR node (separate Float32 topics or Vector3)
-  - Sign direction ("LEFT", "RIGHT", "DIAMOND"/"STOP", "NONE") from the camera node
-  - /odom (Odometry) for closed-loop 90-degree turning (with timed fallback)
+購読 (Subscribe):
+  - レーダー/LiDARノードからの壁距離（個別Float32トピック または Vector3）
+  - カメラノードからの標識方向 ("LEFT", "RIGHT", "DIAMOND"/"STOP", "NONE")
+  - /odom (Odometry): 90度旋回の閉ループ制御用（未受信時は時間ベースで代替）
 
-Publishes:
-  - /cmd_vel (Twist) velocity commands
-  - /motion_controller/state (String) current FSM state
+配信 (Publish):
+  - /cmd_vel (Twist): 速度指令
+  - /motion_controller/state (String): 現在の状態遷移 (FSM)
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from std_msgs.msg import Float32, String
 
 
 class SignCommand(Enum):
-    """Normalized direction/stop commands from the camera node."""
+    """カメラノードから受信する正規化済みの方向・停止コマンド"""
 
     NONE = "NONE"
     LEFT = "LEFT"
@@ -35,7 +35,7 @@ class SignCommand(Enum):
 
 
 class MotionState(Enum):
-    """Finite state machine states for the motion controller."""
+    """移動制御ノードの状態遷移 (FSM)"""
 
     CRUISE_STRAIGHT = "CRUISE_STRAIGHT"
     WAIT_SIGN_AT_WALL = "WAIT_SIGN_AT_WALL"
@@ -48,19 +48,19 @@ class MotionState(Enum):
 
 
 def normalize_angle(angle_rad: float) -> float:
-    """Wrap angle to [-pi, pi]."""
+    """角度を [-pi, pi] の範囲に正規化する"""
     return math.atan2(math.sin(angle_rad), math.cos(angle_rad))
 
 
 def yaw_from_quaternion(x: float, y: float, z: float, w: float) -> float:
-    """Compute planar yaw (rad) from geometry_msgs quaternion."""
+    """geometry_msgs のクォータニオンから平面ヨー角 (rad) を計算する"""
     siny_cosp = 2.0 * (w * z + x * y)
     cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
     return math.atan2(siny_cosp, cosy_cosp)
 
 
 def parse_sign_command(raw: str) -> SignCommand:
-    """Parse flexible string labels from the camera node into SignCommand."""
+    """カメラノードからの文字列ラベルを SignCommand に変換する"""
     token = raw.strip().upper()
     if token in ("LEFT", "L", "TURN_LEFT"):
         return SignCommand.LEFT
@@ -72,18 +72,18 @@ def parse_sign_command(raw: str) -> SignCommand:
 
 
 class MotionControllerNode(Node):
-    """Controls Light Rover speed, corridor centering, cornering, and goal stopping."""
+    """Light Rover の速度制御、通路中央維持、旋回、ゴール停止を行うノード"""
 
     def __init__(self) -> None:
         super().__init__("motion_controller")
         self._declare_parameters()
         self._load_parameters()
 
-        # Publishers
+        # パブリッシャー設定
         self.cmd_pub = self.create_publisher(Twist, self.cmd_vel_topic, 10)
         self.state_pub = self.create_publisher(String, "/motion_controller/state", 10)
 
-        # Distance subscribers (from friend's radar node)
+        # 距離サブスクライバー設定（レーダーノードの出力形式に合わせて切り替え）
         if self.distance_input_mode == "vector3":
             self.dist_vec_sub = self.create_subscription(
                 Vector3,
@@ -111,17 +111,17 @@ class MotionControllerNode(Node):
                 qos_profile_sensor_data,
             )
 
-        # Direction subscriber (from friend's camera node)
+        # 方向サブスクライバー設定（カメラノードから受信）
         self.sign_sub = self.create_subscription(
             String, self.sign_topic, self._sign_callback, 10
         )
 
-        # Odometry subscriber (for accurate 90-degree turns)
+        # オドメトリサブスクライバー設定（正確な90度旋回のため）
         self.odom_sub = self.create_subscription(
             Odometry, self.odom_topic, self._odom_callback, qos_profile_sensor_data
         )
 
-        # Sensor state
+        # センサー状態の初期化
         self._raw_front: Optional[float] = None
         self._raw_left: Optional[float] = None
         self._raw_right: Optional[float] = None
@@ -133,7 +133,7 @@ class MotionControllerNode(Node):
         self._sign_history: Deque[SignCommand] = deque(maxlen=self.sign_history_len)
         self._pending_sign: SignCommand = SignCommand.NONE
 
-        # FSM state
+        # FSM 状態の初期化
         self.state = MotionState.CRUISE_STRAIGHT
         self._state_enter_time = self.get_clock().now()
         self._turn_direction: SignCommand = SignCommand.NONE
@@ -148,39 +148,39 @@ class MotionControllerNode(Node):
         )
 
     def _declare_parameters(self) -> None:
-        # Topic & input mode configuration
+        # トピック名および入力モード設定
         self.declare_parameter("cmd_vel_topic", "/cmd_vel")
         self.declare_parameter("odom_topic", "/odom")
         self.declare_parameter("sign_topic", "/sign_direction")
-        self.declare_parameter("distance_input_mode", "separate")  # "separate" or "vector3"
+        self.declare_parameter("distance_input_mode", "separate")  # "separate" または "vector3"
         self.declare_parameter("dist_front_topic", "/dist_front")
         self.declare_parameter("dist_left_topic", "/dist_left")
         self.declare_parameter("dist_right_topic", "/dist_right")
         self.declare_parameter("wall_distances_topic", "/wall_distances")
-        self.declare_parameter("distance_unit_scale", 1.0)  # 1.0 for meters, 0.01 for cm
+        self.declare_parameter("distance_unit_scale", 1.0)  # メートルなら 1.0、cm なら 0.01
 
-        # Robot & 30 cm corridor geometry (Vstone Light Rover: W176 x D194 mm)
+        # ロボットおよび30cm通路の寸法 (Vstone Light Rover: W176 x D194 mm)
         self.declare_parameter("corridor_width", 0.30)
         self.declare_parameter("robot_width", 0.176)
-        self.declare_parameter("lidar_to_front_offset", 0.097)  # 0.0 if radar outputs bumper dist
-        self.declare_parameter("lidar_to_side_offset", 0.088)   # 0.0 if radar outputs side edge dist
+        self.declare_parameter("lidar_to_front_offset", 0.097)  # バンパー基準の距離なら 0.0
+        self.declare_parameter("lidar_to_side_offset", 0.088)   # 車体側面基準の距離なら 0.0
 
-        # Distance thresholds (meters from robot front/side edges)
+        # 距離しきい値（ロボット前端・側面からの距離 [m]）
         self.declare_parameter("slowdown_start_distance", 0.45)
-        self.declare_parameter("turn_trigger_distance", 0.06)   # ~15.7 cm from center -> center of 30cm corner
-        self.declare_parameter("goal_stop_distance", 0.10)      # Stop 10 cm before diamond wall
+        self.declare_parameter("turn_trigger_distance", 0.06)   # 前端6cm（中心約15.7cm = 30cm角の中央）
+        self.declare_parameter("goal_stop_distance", 0.10)      # ひし形標識の壁の手前10cmで停止
         self.declare_parameter("emergency_stop_distance", 0.04)
-        self.declare_parameter("corridor_wall_max_dist", 0.20)  # Side edge-to-wall max for valid corridor wall
-        self.declare_parameter("side_center_deadband", 0.008)   # 8 mm deadband to avoid oscillation
+        self.declare_parameter("corridor_wall_max_dist", 0.20)  # 通路の壁とみなす側面からの最大距離
+        self.declare_parameter("side_center_deadband", 0.008)   # 振動防止用の不感帯 (8mm)
 
-        # Conservative speeds for 30 cm corridor
+        # 30cm通路向けの低速・安定走行パラメータ
         self.declare_parameter("control_hz", 20.0)
         self.declare_parameter("cruise_linear_speed", 0.10)
         self.declare_parameter("approach_min_speed", 0.045)
         self.declare_parameter("k_wall_center", 1.8)
         self.declare_parameter("max_center_angular", 0.35)
 
-        # Slow cornering parameters
+        # 低速コーナリング（旋回）パラメータ
         self.declare_parameter("turn_angle_deg", 90.0)
         self.declare_parameter("k_yaw", 1.4)
         self.declare_parameter("min_turn_speed", 0.28)
@@ -189,7 +189,7 @@ class MotionControllerNode(Node):
         self.declare_parameter("yaw_tolerance_deg", 2.0)
         self.declare_parameter("turn_timeout_sec", 8.0)
 
-        # Timing, sign confirmation & safety
+        # タイミング・標識確定・安全設定
         self.declare_parameter("sign_history_len", 3)
         self.declare_parameter("sign_confirm_count", 2)
         self.declare_parameter("pre_turn_pause_sec", 0.15)
@@ -247,7 +247,7 @@ class MotionControllerNode(Node):
         self.lidar_fallback_on_unknown_wall = bool(gp("lidar_fallback_on_unknown_wall"))
 
     # ------------------------------------------------------------------
-    # Subscriber callbacks
+    # サブスクライバー コールバック
     # ------------------------------------------------------------------
     @staticmethod
     def _sanitize_distance(val: float, scale: float) -> Optional[float]:
@@ -300,7 +300,7 @@ class MotionControllerNode(Node):
         self._current_yaw = yaw_from_quaternion(q.x, q.y, q.z, q.w)
 
     # ------------------------------------------------------------------
-    # Helpers
+    # ヘルパー関数
     # ------------------------------------------------------------------
     def _transition(self, new_state: MotionState) -> None:
         if new_state != self.state:
@@ -331,7 +331,7 @@ class MotionControllerNode(Node):
         self._transition(MotionState.TURNING)
 
     def _compute_forward_speed(self, d_front: float, stop_dist: float) -> float:
-        """Smoothly scale forward speed down based on distance to the front wall."""
+        """正面壁との距離に応じて前進速度を滑らかに減速させる"""
         if d_front >= self.slowdown_start_distance:
             return self.cruise_linear_speed
         span = max(0.01, self.slowdown_start_distance - stop_dist)
@@ -343,17 +343,18 @@ class MotionControllerNode(Node):
     def _compute_centering_angular(
         self, d_left: Optional[float], d_right: Optional[float]
     ) -> float:
-        """Keep the rover centered in the 30 cm corridor using side wall distances."""
+        """左右の壁距離を用いて30cm通路の中央を維持する角速度を計算する"""
         left_valid = d_left is not None and d_left < self.corridor_wall_max_dist
         right_valid = d_right is not None and d_right < self.corridor_wall_max_dist
 
         if left_valid and right_valid:
-            err = d_left - d_right  # > 0 means closer to right wall -> turn left (+z)
+            # d_left > d_right なら右寄りのため左旋回 (+z) で中央へ戻す
+            err = d_left - d_right
         elif left_valid:
-            # Right side is open (e.g., junction): track nominal clearance from left wall
+            # 右側が開いている場合（分岐点など）：左壁との基準間隔を維持
             err = d_left - self.target_side_clearance
         elif right_valid:
-            # Left side is open: track nominal clearance from right wall
+            # 左側が開いている場合：右壁との基準間隔を維持
             err = self.target_side_clearance - d_right
         else:
             return 0.0
@@ -365,7 +366,7 @@ class MotionControllerNode(Node):
         return max(-self.max_center_angular, min(self.max_center_angular, angular))
 
     # ------------------------------------------------------------------
-    # Main control loop
+    # メイン制御ループ
     # ------------------------------------------------------------------
     def _control_loop(self) -> None:
         state_msg = String()
@@ -497,6 +498,7 @@ class MotionControllerNode(Node):
         self.cmd_pub.publish(cmd)
 
     def stop_robot(self) -> None:
+        """停止指令（速度0）を送信する"""
         self.cmd_pub.publish(Twist())
 
 

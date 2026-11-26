@@ -1,61 +1,61 @@
 motion_controller:
   ros__parameters:
     # ---------------------------------------------------------
-    # 1. ROS 2 Topic Interface (match with friend's nodes)
+    # 1. ROS 2 トピック設定（担当メンバーのノードに合わせて変更）
     # ---------------------------------------------------------
-    cmd_vel_topic: "/cmd_vel"           # Set to "/sample_twist" if using sample topic
+    cmd_vel_topic: "/cmd_vel"           # サンプル環境の場合は "/sample_twist" に変更
     odom_topic: "/odom"
-    sign_topic: "/sign_direction"       # std_msgs/String: "LEFT", "RIGHT", "DIAMOND" (or "STOP"), "NONE"
+    sign_topic: "/sign_direction"       # std_msgs/String: "LEFT", "RIGHT", "DIAMOND" (または "STOP"), "NONE"
 
-    # Distance input mode from radar node:
-    #   "separate" -> Float32 on /dist_front, /dist_left, /dist_right
-    #   "vector3"  -> geometry_msgs/Vector3 on /wall_distances (x=front, y=left, z=right)
+    # レーダーノードからの距離入力形式:
+    #   "separate" -> Float32 を /dist_front, /dist_left, /dist_right で受信
+    #   "vector3"  -> geometry_msgs/Vector3 を /wall_distances (x=正面, y=左, z=右) で受信
     distance_input_mode: "separate"
     dist_front_topic: "/dist_front"
     dist_left_topic: "/dist_left"
     dist_right_topic: "/dist_right"
     wall_distances_topic: "/wall_distances"
-    distance_unit_scale: 1.0            # 1.0 if radar publishes meters, 0.01 if centimeters
+    distance_unit_scale: 1.0            # 単位がメートルなら 1.0、cm なら 0.01
 
     # ---------------------------------------------------------
-    # 2. Robot & 30 cm Corridor Geometry (Light Rover: W176 x D194 mm)
+    # 2. ロボット・30cm通路の寸法設定 (Light Rover: W176 x D194 mm)
     # ---------------------------------------------------------
-    corridor_width: 0.30                # 30 cm corridor
-    robot_width: 0.176                  # 17.6 cm robot width
-    # Set offsets to 0.0 if friend's radar node already outputs bumper/edge distances
-    lidar_to_front_offset: 0.097        # LiDAR center to front bumper (m)
-    lidar_to_side_offset: 0.088         # LiDAR center to left/right edge (m)
+    corridor_width: 0.30                # 通路幅 30 cm
+    robot_width: 0.176                  # ロボット全幅 17.6 cm
+    # レーダーノードが車体バンパー・側面基準の距離を出力する場合は 0.0 に設定
+    lidar_to_front_offset: 0.097        # LiDAR中心から前方バンパーまでの距離 [m]
+    lidar_to_side_offset: 0.088         # LiDAR中心から左右側面までの距離 [m]
 
     # ---------------------------------------------------------
-    # 3. Distance Thresholds (meters from robot front/side edges)
+    # 3. 距離しきい値（ロボット前端・側面からの距離 [m]）
     # ---------------------------------------------------------
-    slowdown_start_distance: 0.45       # Begin decelerating as front wall comes within 45 cm
-    turn_trigger_distance: 0.06         # Front bumper 6 cm -> center ~15.7 cm (center of 30 cm corner)
-    goal_stop_distance: 0.10            # Stop 10 cm before diamond wall
+    slowdown_start_distance: 0.45       # 正面壁が 45 cm 以内に近づいたら減速開始
+    turn_trigger_distance: 0.06         # 前端 6 cm（中心約 15.7 cm = 30cm角の中央で旋回）
+    goal_stop_distance: 0.10            # ひし形標識の壁の手前 10 cm で停止
     emergency_stop_distance: 0.04
-    corridor_wall_max_dist: 0.20        # Max side-edge-to-wall dist considered a closed corridor wall
-    side_center_deadband: 0.008         # 8 mm deadband to prevent jitter
+    corridor_wall_max_dist: 0.20        # 通路の壁とみなす側面からの最大距離
+    side_center_deadband: 0.008         # ふらつき防止用の不感帯 (8 mm)
 
     # ---------------------------------------------------------
-    # 4. Conservative Speeds & Control Gains (30 cm corridor)
+    # 4. 30cm通路向けの低速・制御ゲイン設定
     # ---------------------------------------------------------
     control_hz: 20.0
-    cruise_linear_speed: 0.10           # Slow, safe cruising speed (m/s)
-    approach_min_speed: 0.045           # Minimum creep speed near front wall (m/s)
-    k_wall_center: 1.8                  # Corridor centering P-gain
-    max_center_angular: 0.35            # Max centering steering rate (rad/s)
+    cruise_linear_speed: 0.10           # 安全な低速直進速度 [m/s]
+    approach_min_speed: 0.045           # 壁直前での最低微速 [m/s]
+    k_wall_center: 1.8                  # 通路中央維持の P ゲイン
+    max_center_angular: 0.35            # 中央補正時の最大角速度 [rad/s]
 
-    # Slow cornering
+    # 低速コーナリング（旋回）設定
     turn_angle_deg: 90.0
     k_yaw: 1.4
-    min_turn_speed: 0.28                # Slow enough for 30 cm corner, enough to overcome friction
-    max_turn_speed: 0.48                # Capped slow angular speed during 90-deg turn
-    fallback_turn_speed: 0.40           # Used only if /odom is unavailable
+    min_turn_speed: 0.28                # 摩擦に負けず低速で回る最小角速度 [rad/s]
+    max_turn_speed: 0.48                # 30cm通路向けの安全な最大旋回角速度 [rad/s]
+    fallback_turn_speed: 0.40           # /odom が使えない場合の代替角速度
     yaw_tolerance_deg: 2.0
     turn_timeout_sec: 8.0
 
     # ---------------------------------------------------------
-    # 5. Sign Confirmation & Safety Timings
+    # 5. 標識確定・安全タイミング設定
     # ---------------------------------------------------------
     sign_history_len: 3
     sign_confirm_count: 2
