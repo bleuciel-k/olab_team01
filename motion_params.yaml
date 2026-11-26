@@ -1,0 +1,66 @@
+motion_controller:
+  ros__parameters:
+    # ---------------------------------------------------------
+    # 1. ROS 2 Topic Interface (match with friend's nodes)
+    # ---------------------------------------------------------
+    cmd_vel_topic: "/cmd_vel"           # Set to "/sample_twist" if using sample topic
+    odom_topic: "/odom"
+    sign_topic: "/sign_direction"       # std_msgs/String: "LEFT", "RIGHT", "DIAMOND" (or "STOP"), "NONE"
+
+    # Distance input mode from radar node:
+    #   "separate" -> Float32 on /dist_front, /dist_left, /dist_right
+    #   "vector3"  -> geometry_msgs/Vector3 on /wall_distances (x=front, y=left, z=right)
+    distance_input_mode: "separate"
+    dist_front_topic: "/dist_front"
+    dist_left_topic: "/dist_left"
+    dist_right_topic: "/dist_right"
+    wall_distances_topic: "/wall_distances"
+    distance_unit_scale: 1.0            # 1.0 if radar publishes meters, 0.01 if centimeters
+
+    # ---------------------------------------------------------
+    # 2. Robot & 30 cm Corridor Geometry (Light Rover: W176 x D194 mm)
+    # ---------------------------------------------------------
+    corridor_width: 0.30                # 30 cm corridor
+    robot_width: 0.176                  # 17.6 cm robot width
+    # Set offsets to 0.0 if friend's radar node already outputs bumper/edge distances
+    lidar_to_front_offset: 0.097        # LiDAR center to front bumper (m)
+    lidar_to_side_offset: 0.088         # LiDAR center to left/right edge (m)
+
+    # ---------------------------------------------------------
+    # 3. Distance Thresholds (meters from robot front/side edges)
+    # ---------------------------------------------------------
+    slowdown_start_distance: 0.45       # Begin decelerating as front wall comes within 45 cm
+    turn_trigger_distance: 0.06         # Front bumper 6 cm -> center ~15.7 cm (center of 30 cm corner)
+    goal_stop_distance: 0.10            # Stop 10 cm before diamond wall
+    emergency_stop_distance: 0.04
+    corridor_wall_max_dist: 0.20        # Max side-edge-to-wall dist considered a closed corridor wall
+    side_center_deadband: 0.008         # 8 mm deadband to prevent jitter
+
+    # ---------------------------------------------------------
+    # 4. Conservative Speeds & Control Gains (30 cm corridor)
+    # ---------------------------------------------------------
+    control_hz: 20.0
+    cruise_linear_speed: 0.10           # Slow, safe cruising speed (m/s)
+    approach_min_speed: 0.045           # Minimum creep speed near front wall (m/s)
+    k_wall_center: 1.8                  # Corridor centering P-gain
+    max_center_angular: 0.35            # Max centering steering rate (rad/s)
+
+    # Slow cornering
+    turn_angle_deg: 90.0
+    k_yaw: 1.4
+    min_turn_speed: 0.28                # Slow enough for 30 cm corner, enough to overcome friction
+    max_turn_speed: 0.48                # Capped slow angular speed during 90-deg turn
+    fallback_turn_speed: 0.40           # Used only if /odom is unavailable
+    yaw_tolerance_deg: 2.0
+    turn_timeout_sec: 8.0
+
+    # ---------------------------------------------------------
+    # 5. Sign Confirmation & Safety Timings
+    # ---------------------------------------------------------
+    sign_history_len: 3
+    sign_confirm_count: 2
+    pre_turn_pause_sec: 0.15
+    post_turn_settle_sec: 0.25
+    wait_sign_timeout_sec: 1.5
+    sensor_timeout_sec: 1.0
+    lidar_fallback_on_unknown_wall: false
