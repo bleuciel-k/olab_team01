@@ -63,4 +63,6 @@ motion_controller:
     post_turn_settle_sec: 0.25
     wait_sign_timeout_sec: 1.5
     sensor_timeout_sec: 1.0
+    require_front_distance: false       # 壁なしテスト用: false なら距離未受信でも走行（迷路本番は true 推奨）
+    treat_nan_front_as_clear: true      # 正面距離が NaN（壁なし）のとき前方クリア(10m)として走行
     lidar_fallback_on_unknown_wall: false

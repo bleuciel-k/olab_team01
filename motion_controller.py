@@ -196,6 +196,8 @@ class MotionControllerNode(Node):
         self.declare_parameter("post_turn_settle_sec", 0.25)
         self.declare_parameter("wait_sign_timeout_sec", 1.5)
         self.declare_parameter("sensor_timeout_sec", 1.0)
+        self.declare_parameter("require_front_distance", False)
+        self.declare_parameter("treat_nan_front_as_clear", True)
         self.declare_parameter("lidar_fallback_on_unknown_wall", False)
 
     def _load_parameters(self) -> None:
@@ -244,6 +246,8 @@ class MotionControllerNode(Node):
         self.post_turn_settle_sec = float(gp("post_turn_settle_sec"))
         self.wait_sign_timeout_sec = float(gp("wait_sign_timeout_sec"))
         self.sensor_timeout_sec = float(gp("sensor_timeout_sec"))
+        self.require_front_distance = bool(gp("require_front_distance"))
+        self.treat_nan_front_as_clear = bool(gp("treat_nan_front_as_clear"))
         self.lidar_fallback_on_unknown_wall = bool(gp("lidar_fallback_on_unknown_wall"))
 
     # ------------------------------------------------------------------
@@ -378,18 +382,23 @@ class MotionControllerNode(Node):
             return
 
         now = self.get_clock().now()
-        if (
-            self._raw_front is None
-            or self._last_front_time is None
-            or (now - self._last_front_time).nanoseconds * 1e-9 > self.sensor_timeout_sec
+        front_msg_fresh = (
+            self._last_front_time is not None
+            and (now - self._last_front_time).nanoseconds * 1e-9 <= self.sensor_timeout_sec
+        )
+        if front_msg_fresh and self._raw_front is not None:
+            d_front = max(0.0, self._raw_front - self.lidar_to_front_offset)
+        elif (front_msg_fresh and self.treat_nan_front_as_clear) or (
+            not self.require_front_distance
         ):
+            # 壁がない（NaN）または壁なしテストモード時は前方クリア（10m）として走行
+            d_front = 10.0
+        else:
             self.stop_robot()
             self.get_logger().warning(
                 "Waiting for valid front distance data...", throttle_duration_sec=2.0
             )
             return
-
-        d_front = max(0.0, self._raw_front - self.lidar_to_front_offset)
         d_left = (
             max(0.0, self._raw_left - self.lidar_to_side_offset)
             if self._raw_left is not None
