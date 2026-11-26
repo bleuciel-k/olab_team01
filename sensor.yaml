@@ -1,0 +1,79 @@
+import math
+from statistics import median
+
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
+from sensor_msgs.msg import LaserScan
+from std_msgs.msg import Float32
+
+
+class WallDistanceNode(Node):
+    def __init__(self):
+        super().__init__('wall_distance_node')
+
+        self.declare_parameter('scan_topic', '/scan')
+        self.declare_parameter('front_angle_deg', 0.0)
+        self.declare_parameter('sector_half_width_deg', 10.0)
+
+        scan_topic = self.get_parameter('scan_topic').value
+        front_angle = self.get_parameter('front_angle_deg').value
+        half_width = self.get_parameter('sector_half_width_deg').value
+
+        self.half_width = math.radians(half_width)
+        self.directions = {
+            'front': math.radians(front_angle),
+            'left': math.radians(front_angle + 90.0),
+            'right': math.radians(front_angle - 90.0),
+        }
+
+        self.distance_publishers = {
+            direction: self.create_publisher(Float32, f'/dist_{direction}', 10)
+            for direction in self.directions
+        }
+        self.subscription = self.create_subscription(
+            LaserScan, scan_topic, self.scan_callback, qos_profile_sensor_data
+        )
+
+    def scan_callback(self, scan):
+        samples = {direction: [] for direction in self.directions}
+
+        for index, distance in enumerate(scan.ranges):
+            if not math.isfinite(distance) or distance <= 0.0:
+                continue
+            if not scan.range_min <= distance <= scan.range_max:
+                continue
+
+            angle = scan.angle_min + index * scan.angle_increment
+
+            for direction, center_angle in self.directions.items():
+                # ±180度の境目をまたいでも角度差を正しく求める。
+                delta = angle - center_angle
+                delta = math.atan2(math.sin(delta), math.cos(delta))
+
+                if abs(delta) <= self.half_width:
+                    # 斜めの測距値を、正面・左・右の各方向に投影する。
+                    samples[direction].append(distance * math.cos(delta))
+
+        for direction, readings in samples.items():
+            message = Float32()
+            # 測定できなかった方向は NaN を送り、制御側で無効値として扱う。
+            message.data = float(median(readings)) if readings else float('nan')
+            self.distance_publishers[direction].publish(message)
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = WallDistanceNode()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
