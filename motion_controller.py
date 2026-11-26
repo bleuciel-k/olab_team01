@@ -504,6 +504,20 @@ class MotionControllerNode(Node):
                 self._clear_sign_memory()
                 self._transition(MotionState.CRUISE_STRAIGHT)
 
+        # リアルタイム距離・標識・速度指令を 0.5 秒ごとにログ出力する
+        front_str = (
+            f"{d_front * 100.0:.1f}cm"
+            if (front_msg_fresh and self._raw_front is not None)
+            else "CLEAR(---)"
+        )
+        left_str = f"{d_left * 100.0:.1f}cm" if d_left is not None else "---"
+        right_str = f"{d_right * 100.0:.1f}cm" if d_right is not None else "---"
+        self.get_logger().info(
+            f"[{self.state.value}] front={front_str} left={left_str} right={right_str} | "
+            f"sign={self._pending_sign.value} | cmd=(v={cmd.linear.x:.2f}, w={cmd.angular.z:.2f})",
+            throttle_duration_sec=0.5,
+        )
+
         self.cmd_pub.publish(cmd)
 
     def stop_robot(self) -> None:
